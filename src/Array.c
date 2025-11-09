@@ -1,5 +1,16 @@
 #include "c4.h"
 
+int64 calculateBytes(uint count, uint itemSize) {
+    var totalBytes = (uint64) count * itemSize;
+    
+    if (totalBytes > UINT32_MAX) {
+        throwException("Array size in bytes exceeds the 32-bit limit.");
+        return -1;
+    }
+
+    return (uint) totalBytes;
+}
+
 Array allocateArray (
     uint itemSize,
     uint capacity,
@@ -7,7 +18,14 @@ Array allocateArray (
     uint length
 ) {
     var result = (Array) {};
-    result.items = allocate((capacity + 1) * itemSize);
+
+    var totalBytes = (uint) calculateBytes(capacity + 1, itemSize);
+
+    if (totalBytes < 0) {
+        return result;
+    }
+
+    result.items = allocate(totalBytes);
 
     if (result.items == NULL) {
         throwException("Unable to reserve memory for array.");
@@ -18,18 +36,24 @@ Array allocateArray (
     result.capacity = capacity;
     result.length = length;
 
+    totalBytes = calculateBytes(length, itemSize);
+
+    if (totalBytes < 0) {
+        return result;
+    }
+
     if (values != NULL && length > 0) {
-        memcpy(result.items, values, length * itemSize);
+        memcpy(result.items, values, totalBytes);
     }
 
     // set result.items[length] to 'null'
-    var base = (byte*) result.items + (length * itemSize);
+    var base = (byte*) result.items + totalBytes;
     memset(base, 0, itemSize);
 
     return result;
 }
 
-ptr arrayItemAt (uint itemSize, Array this, uint index) {
+ptr _arrayItemAt (Array this, uint index, uint itemSize) {
     if (itemSize != this.itemSize) {
         throwException("Incorrect type.");
         return NULL;
@@ -49,10 +73,10 @@ ptr arrayItemAt (uint itemSize, Array this, uint index) {
 }
 
 boolean shiftArrayRight (
-    uint size,
+    uint itemSize,
     Array* this,
     uint startIndex,
-    uint items
+    uint itemCount
 ) {
     if (this == NULL) {
         throwException("Null reference detected.");
@@ -64,8 +88,6 @@ boolean shiftArrayRight (
         return false;
     }
 
-    var itemSize = (*this).itemSize;
-
     if (itemSize != (*this).itemSize) {
         throwException("Incorrect type.");
         return false;
@@ -76,39 +98,58 @@ boolean shiftArrayRight (
         return false;
     }
 
-    var newLength = (*this).length + items;
+    var newLength = (*this).length + itemCount;
+    var oldItems = (*this).items;
 
-    if (newLength > (*this).capacity) {
-        var newCapacity = ((*this).capacity || items) * 2;
+    var totalBytes = (uint) 0;
+    var newCapacity = (*this).capacity || 1;
 
-        if ((*this).items == NULL) {
-            (*this).items = allocate(newCapacity * itemSize);
-        } else {
-            (*this).items = reallocate((*this).items, newCapacity * itemSize);
+    while (newLength > newCapacity) {
+        newCapacity = 2 * newCapacity;
+    }
+
+    if (newCapacity > (*this).capacity) {
+        totalBytes = calculateBytes(newCapacity + 1, itemSize);
+
+        if (totalBytes < 0) {
+            return false;
         }
+
+        (*this).items = reallocate((*this).items, totalBytes);
 
         if ((*this).items == NULL) {
             // realloc failed
-            throwException("Unable to increase the size of an array.");
+            throwException(
+                "Unable to reserve space to increase array size."
+            );
+
             return false;
         }
 
         (*this).capacity = newCapacity;
     }
 
-    var base = (byte*) (*this).items;
-    var end = startIndex + items;
+    var base = (*this).items;
+    var moveToIndex = itemSize * (startIndex + itemCount);
+    var moveTo = base + moveToIndex;
 
-    forEach (i, from(newLength),
-                downTo(end)
-    ) {
-        var source = (ptr) (base + ((i - items) * itemSize));
-        var dest = (ptr) (base + (i * itemSize));
+    var moveFromIndex = itemSize * startIndex;
+    var moveFrom = base + moveFromIndex;
 
-        memcpy(dest, source, itemSize);
+    totalBytes = itemSize * ((*this).length - startIndex);
+    memmove(moveTo, moveFrom, totalBytes);
+
+    (*this).length = newLength;
+
+    var sentinelOffset = calculateBytes(newLength, itemSize);
+
+    if (sentinelOffset < 0) {
+        return false;
+    } else {
+        var sentinelBase = base + sentinelOffset;
+        memset(sentinelBase, 0, itemSize);
     }
 
-    (*this).length = (*this).length + items;
     return true;
 }
 
@@ -131,30 +172,35 @@ Pointer insertArrayItems (
         return nullPointer;
     }
 
-    var base = (byte*) (*this).items;
-    var newItem = (ptr) (base + (index * itemSize));
-    memcpy(newItem, value.data, itemSize * numberOfItems);
+    var $base = (byte*) (*this).items;
+    var byteOffset = calculateBytes(index, itemSize);
+    var totalBytes = calculateBytes(numberOfItems, itemSize);
 
-    return _pointerTo(itemSize, newItem);
+    if (byteOffset < 0 || totalBytes < 0) {
+        return nullPointer;
+    }
+
+    var $newItem = $base + byteOffset;
+    memcpy($newItem, value.data, totalBytes);
+
+    return _pointerTo(itemSize, $newItem);
 }
 
 boolean shiftArrayLeft (
-    uint size,
+    uint itemSize,
     Array* this,
     uint startIndex,
-    uint items
+    uint itemCount
 ) {
     if (this == NULL) {
         throwException("Null reference detected.");
         return false;
     }
 
-    if ((*this).items == NULL && index > 0) {
+    if ((*this).items == NULL && startIndex > 0) {
         throwException("Null reference detected.");
         return false;
     }
-
-    var itemSize = (*this).itemSize;
 
     if (itemSize != (*this).itemSize) {
         throwException("Incorrect type.");
@@ -166,32 +212,49 @@ boolean shiftArrayLeft (
         return false;
     }
 
-    var base = (byte*) (*this).items;
-    var end = startIndex + items;
 
-    forEach (i, from(startIndex),
-                upTo(end)
-    ) {
-        var source = (ptr) (base + (i + items) * itemSize);
-        var dest = (ptr) (base + (i * itemSize));
+    var base = (*this).items;
+    var moveToIndex = itemSize * (startIndex - itemCount);
+    var moveTo = base + moveToIndex;
 
-        memcpy(dest, source, itemSize);
+    var moveFromIndex = itemSize * startIndex;
+    var moveFrom = base + moveFromIndex;
+
+    var totalBytes = itemSize * ((*this).length - startIndex);
+    memmove(moveTo, moveFrom, totalBytes);
+
+    var newLength = (*this).length - itemCount;
+    (*this).length = newLength;
+
+    if (newLength > 0) {
+        var sentinelOffset = calculateBytes(newLength, itemSize);
+
+        if (sentinelOffset < 0) {
+            return false; 
+        }
+
+        var sentinelBase = (byte*) base + sentinelOffset;
+        memset(sentinelBase, 0, itemSize);
     }
 
-    (*this).length = (*this).length - items;
     return true;
 }
 
 Pointer _removeArrayItems (
-    uint itemSize, 
-    Array* this, 
-    uint index, 
-    uint numberOfItems
+    Array* this,
+    uint index,
+    uint numberOfItems,
+    uint itemSize
 ) {
     var nullPointer = (Pointer) { .data = NULL };
     var base = (byte*) (*this).items;
-    var item = (ptr) (base + (index * itemSize));
+    var byteOffset = calculateBytes(index, itemSize);
 
+    if (byteOffset < 0) {
+        return nullPointer;
+    }
+
+    var item = (ptr) (base + byteOffset);
     var result = _new (itemSize);
     memcpy(result.data, item, itemSize);
 
@@ -204,3 +267,14 @@ Pointer _removeArrayItems (
     }
 }
 
+void deleteArray (Array* this) {
+    if (this != NULL) {
+        if ((*this).items != NULL) {
+            free((*this).items);
+            (*this).items = NULL;
+        }
+
+        (*this).capacity = 0;
+        (*this).length = 0;
+    }
+}
