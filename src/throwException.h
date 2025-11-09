@@ -11,4 +11,3 @@ void defaultExceptionHandler (cstring message);
 void setExceptionHandler (ExceptionHandler newHandler);
 
 #endif // _C4_THROW_EXCEPTION_H_
-
