@@ -15,4 +15,3 @@ Pointer newPerson (cstring name, int age) {
 
     return this;
 }
-
