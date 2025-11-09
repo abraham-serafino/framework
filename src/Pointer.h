@@ -30,4 +30,3 @@ void setReallocator (Reallocator newReallocator);
 #define isNull(this) (this.data == NULL)
 
 #endif // _C4_POINTER_H_
-
