@@ -64,4 +64,3 @@ void setAllocator (Allocator newAllocator) {
 void setReallocator (Reallocator newReallocator) {
     reallocate = newReallocator;
 }
-
