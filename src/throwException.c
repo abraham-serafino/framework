@@ -16,4 +16,3 @@ void throwException (cstring message) {
 void setExceptionHandler (ExceptionHandler newHandler) {
     exceptionHandler = newHandler;
 }
-
