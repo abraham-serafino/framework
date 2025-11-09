@@ -11,6 +11,8 @@
 #define word uint16_t
 #define int int32_t
 #define uint uint32_t
+#define int64 int64_t
+#define uint64 uint64_t
 #define double double
 #define int128 __int128         // requires CLang or GCC
 #define uint128 bitfield(128)   // requires C23
@@ -28,4 +30,3 @@
     enum name
 
 #endif // _C4_TYPES_H_
-
