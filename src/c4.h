@@ -33,4 +33,3 @@
 #define unless(...) if(! (__VA_ARGS__))
 
 #endif // _C4_H_
-
